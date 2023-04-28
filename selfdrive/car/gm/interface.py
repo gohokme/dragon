@@ -225,6 +225,14 @@ class CarInterface(CarInterfaceBase):
       ret.minEnableSpeed = -1.  # engage speed is decided by pcm
       ret.autoResumeSng = True
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+      
+    elif candidate == CAR.TRAX:
+      ret.mass = 1300. * CV.LB_TO_KG + STD_CARGO_KG
+      ret.wheelbase = 2.70
+      ret.steerRatio = 16.1
+      ret.centerToFront = ret.wheelbase * 0.4
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+      
 
     # TODO: start from empirically derived lateral slip stiffness for the civic and scale by
     # mass and CG position, so all cars will have approximately similar dyn behaviors
