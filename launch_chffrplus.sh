@@ -9,6 +9,20 @@ source "$BASEDIR/launch_env.sh"
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
 function two_init {
+  if [ -f /EON ]; then
+    if [ ! -f /system/fonts/NotoSansCJKtc-Regular.otf ]; then
+      mount -o remount,rw /system
+      rm -fr /system/fonts/NotoSansTC*.otf
+      rm -fr /system/fonts/NotoSansSC*.otf
+      rm -fr /system/fonts/NotoSansKR*.otf
+      rm -fr /system/fonts/NotoSansJP*.otf
+      cp -rf /data/openpilot/selfdrive/assets/fonts/NotoSansCJKtc-* /system/fonts/
+      cp -rf /data/openpilot/selfdrive/assets/fonts/fonts.xml /system/etc/fonts.xml
+      chmod 644 /system/etc/fonts.xml
+      chmod 644 /system/fonts/NotoSansCJKtc-*
+      mount -o remount,r /system
+    fi
+  fi
 
   dt=$(date +%s)
 
@@ -221,18 +235,6 @@ function agnos_init {
     fi
     $DIR/system/hardware/tici/updater $AGNOS_PY $MANIFEST
   fi
-
-  #dp: change splash logo
-  if [ -f "/usr/comma/.dp_splash" ]; then
-      echo "DP splash exists."
-  else
-      echo "DP splash not deployed yet"
-      sudo mount -o rw,remount /
-      sudo cp /data/openpilot/selfdrive/dragonpilot/bg.jpg /usr/comma/bg.jpg
-      sudo touch /usr/comma/.dp_splash
-      sudo mount -o ro,remount /
-      sudo reboot
-  fi
 }
 
 function launch {
@@ -296,10 +298,15 @@ function launch {
 
   # start manager
   cd selfdrive/manager
-  if [ ! -f "/data/params/d/OsmLocal" ]; then
-    ./build.py && ./manager.py
+  if [ -f /data/params/d/OsmLocal ]; then
+    OSM_LOCAL=`cat /data/params/d/OsmLocal`
   else
+    OSM_LOCAL="0"
+  fi
+  if [ $OSM_LOCAL = "1" ]; then
     ./build.py && ./local_osm_install.py && ./manager.py
+  else
+    ./build.py && ./manager.py
   fi
 
   # if broken, keep on screen error

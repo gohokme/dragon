@@ -8,7 +8,7 @@ from selfdrive.controls.lib.lane_planner import LanePlanner, TRAJECTORY_SIZE
 from selfdrive.controls.lib.desire_helper import DesireHelper
 import cereal.messaging as messaging
 from cereal import log
-from selfdrive.hardware import TICI
+from system.hardware import TICI
 from common.params import Params
 
 
@@ -51,6 +51,10 @@ class LateralPlanner:
       self.dp_lanelines_enable = sm['dragonConf'].dpLateralLanelines
       self.dp_camera_offset = sm['dragonConf'].dpLateralCameraOffset
       self.dp_path_offset = sm['dragonConf'].dpLateralPathOffset
+      if sm['controlsState'].dpLateralAltActive and sm['dragonConf'].dpLateralAltLanelines:
+        self.dp_lanelines_enable = True
+        self.dp_camera_offset = sm['dragonConf'].dpLateralAltCameraOffset
+        self.dp_path_offset = sm['dragonConf'].dpLateralAltPathOffset
 
     # Parse model predictions
     md = sm['modelV2']
@@ -67,7 +71,7 @@ class LateralPlanner:
 
     # Lane change logic
     lane_change_prob = self.LP.l_lane_change_prob + self.LP.r_lane_change_prob
-    self.DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob, sm['dragonConf'])
+    self.DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob, sm['dragonConf'], md)
 
     # Turn off lanes during lane change
     if self.DH.desire == log.LateralPlan.Desire.laneChangeRight or self.DH.desire == log.LateralPlan.Desire.laneChangeLeft:
@@ -76,10 +80,13 @@ class LateralPlanner:
 
     # dynamic laneline/laneless logic
     # decide if we want to use lanelines or laneless
-    self.dp_lanelines_active = get_lane_laneless_mode(self.LP.lll_prob, self.LP.rll_prob, self.dp_lanelines_active)
+    if self.dp_lanelines_enable:
+      self.dp_lanelines_active = get_lane_laneless_mode(self.LP.lll_prob, self.LP.rll_prob, self.dp_lanelines_active)
+    else:
+      self.dp_lanelines_active = False
 
     # Calculate final driving path and set MPC costs
-    if self.dp_lanelines_enable and self.dp_lanelines_active:
+    if self.dp_lanelines_active:
       self.d_path_xyz = self.LP.get_d_path(v_ego, self.t_idxs, self.path_xyz)
       self.lat_mpc.set_weights(MPC_COST_LAT.PATH, MPC_COST_LAT.HEADING, self.steer_rate_cost)
     else:
@@ -135,7 +142,7 @@ class LateralPlanner:
     lateralPlan.solverExecutionTime = self.lat_mpc.solve_time
 
     lateralPlan.desire = self.DH.desire
-    lateralPlan.useLaneLines = self.dp_lanelines_enable and self.dp_lanelines_active
+    lateralPlan.useLaneLines = self.dp_lanelines_active
     lateralPlan.laneChangeState = self.DH.lane_change_state
     lateralPlan.laneChangeDirection = self.DH.lane_change_direction
 

@@ -8,10 +8,10 @@ from cereal import car
 from common.basedir import BASEDIR
 from common.conversions import Conversions as CV
 from common.kalman.simple_kalman import KF1D
-from common.numpy_fast import interp
+from common.numpy_fast import clip, interp
 from common.realtime import DT_CTRL
-from selfdrive.car import apply_hysteresis, gen_empty_fingerprint
-from selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, apply_deadzone
+from selfdrive.car import apply_hysteresis, gen_empty_fingerprint, scale_rot_inertia, scale_tire_stiffness
+from selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, apply_center_deadzone
 from selfdrive.controls.lib.events import Events
 from selfdrive.controls.lib.vehicle_model import VehicleModel
 from common.params import Params
@@ -93,10 +93,35 @@ class CarInterfaceBase(ABC):
   def get_pid_accel_limits(CP, current_speed, cruise_speed):
     return ACCEL_MIN, ACCEL_MAX
 
+  @classmethod
+  def get_non_essential_params(cls, candidate: str):
+    """
+    Parameters essential to controlling the car may be incomplete or wrong without FW versions or fingerprints.
+    """
+    return cls.get_params(candidate, gen_empty_fingerprint(), list(), False)
+
+  @classmethod
+  def get_params(cls, candidate: str, fingerprint: Dict[int, Dict[int, int]], car_fw: List[car.CarParams.CarFw], experimental_long: bool):
+    ret = CarInterfaceBase.get_std_params(candidate)
+    ret = cls._get_params(ret, candidate, fingerprint, car_fw, experimental_long)
+
+    # Set common params using fields set by the car interface
+    # TODO: get actual value, for now starting with reasonable value for
+    # civic and scaling by mass and wheelbase
+    ret.rotationalInertia = scale_rot_inertia(ret.mass, ret.wheelbase)
+
+    # TODO: some car interfaces set stiffness factor
+    if ret.tireStiffnessFront == 0 or ret.tireStiffnessRear == 0:
+      # TODO: start from empirically derived lateral slip stiffness for the civic and scale by
+      # mass and CG position, so all cars will have approximately similar dyn behaviors
+      ret.tireStiffnessFront, ret.tireStiffnessRear = scale_tire_stiffness(ret.mass, ret.wheelbase, ret.centerToFront)
+
+    return ret
+
   @staticmethod
   @abstractmethod
-  def get_params(candidate, fingerprint=gen_empty_fingerprint(), car_fw=None, experimental_long=False):
-    pass
+  def _get_params(ret: car.CarParams, candidate: str, fingerprint: Dict[int, Dict[int, int]], car_fw: List[car.CarParams.CarFw], experimental_long: bool):
+    raise NotImplementedError
 
   @staticmethod
   def init(CP, logcan, sendcan):
@@ -115,7 +140,7 @@ class CarInterfaceBase(ABC):
   def torque_from_lateral_accel_linear(lateral_accel_value, torque_params, lateral_accel_error, lateral_accel_deadzone, friction_compensation):
     # The default is a linear relationship between torque and lateral acceleration (accounting for road roll and steering friction)
     friction_interp = interp(
-      apply_deadzone(lateral_accel_error, lateral_accel_deadzone),
+      apply_center_deadzone(lateral_accel_error, lateral_accel_deadzone),
       [-FRICTION_THRESHOLD, FRICTION_THRESHOLD],
       [-torque_params.friction, torque_params.friction]
     )
@@ -127,7 +152,7 @@ class CarInterfaceBase(ABC):
 
   # returns a set of default params to avoid repetition in car specific params
   @staticmethod
-  def get_std_params(candidate, fingerprint):
+  def get_std_params(candidate):
     ret = car.CarParams.new_message()
     ret.carFingerprint = candidate
 
@@ -177,21 +202,45 @@ class CarInterfaceBase(ABC):
     tune.torque.steeringAngleDeadzoneDeg = steering_angle_deadzone_deg
 
   @staticmethod
-  def configure_dp_tune(candidate, tune, steering_angle_deadzone_deg=0.0, use_steering_angle=True):
+  def configure_dp_tune(stock, collection):
     try:
       dp_lateral_tune = int(Params().get("dp_lateral_tune").decode('utf-8'))
     except:
       dp_lateral_tune = 0
 
-    # pid - car specific
-    if dp_lateral_tune == 1:
-      configure_pid_tune(candidate, tune)
-    # lqr - all uses RAV4 one
-    elif dp_lateral_tune == 2:
-      configure_lqr_tune(candidate, tune)
-    # torque - car specific as per lookup table
-    elif dp_lateral_tune == 3:
-      CarInterfaceBase.configure_torque_tune(candidate, tune, steering_angle_deadzone_deg, use_steering_angle)
+    stock_tune = 0
+    if stock.which() == 'pid':
+      stock_tune = 1
+      collection.pid = stock.pid
+    elif stock.which() == 'lqr':
+      stock_tune = 2
+      collection.lqr = stock.lqr
+    elif stock.which() == 'torque':
+      stock_tune = 3
+      collection.torque = stock.torque
+    elif stock.which() == 'indi':
+      stock_tune = 4
+
+    if dp_lateral_tune > 0 and dp_lateral_tune != stock_tune:
+      if dp_lateral_tune == 1 and collection.pid is not None:
+        stock.pid = collection.pid
+      elif dp_lateral_tune == 2 and collection.lqr is not None:
+        stock.lqr = collection.lqr
+      elif dp_lateral_tune == 3 and collection.torque is not None:
+        stock.torque = collection.torque
+
+  @staticmethod
+  def dp_lat_tune_collection(candidate, collection, steering_angle_deadzone_deg=0.0, use_steering_angle=True):
+    for i in range(1, 4):
+      # pid - car specific
+      if i == 1:
+        configure_pid_tune(candidate, collection)
+      # lqr - all uses RAV4 one
+      elif i == 2:
+        configure_lqr_tune(candidate, collection)
+      # torque - car specific as per lookup table
+      elif i == 3:
+        CarInterfaceBase.configure_torque_tune(candidate, collection, steering_angle_deadzone_deg, use_steering_angle)
 
   @abstractmethod
   def _update(self, c: car.CarControl) -> car.CarState:
@@ -232,7 +281,7 @@ class CarInterfaceBase(ABC):
     return reader
 
   @abstractmethod
-  def apply(self, c: car.CarControl) -> Tuple[car.CarControl.Actuators, List[bytes]]:
+  def apply(self, c: car.CarControl, now_nanos: int) -> Tuple[car.CarControl.Actuators, List[bytes]]:
     pass
 
   def create_common_events(self, cs_out, extra_gears=None, pcm_enable=True, allow_enable=True,
@@ -243,12 +292,12 @@ class CarInterfaceBase(ABC):
       events.add(EventName.doorOpen)
     if cs_out.seatbeltUnlatched:
       events.add(EventName.seatbeltNotLatched)
-    if self.dragonconf.dpAtl != 1 and cs_out.gearShifter != GearShifter.drive and (extra_gears is None or
+    if cs_out.gearShifter != GearShifter.drive and (extra_gears is None or
        cs_out.gearShifter not in extra_gears):
       events.add(EventName.wrongGear)
     if cs_out.gearShifter == GearShifter.reverse:
       events.add(EventName.reverseGear)
-    if self.dragonconf.dpAtl == 0 and not cs_out.cruiseState.available:
+    if not cs_out.cruiseState.available:
       events.add(EventName.wrongCarMode)
     if cs_out.espDisabled:
       events.add(EventName.espDisabled)
@@ -258,13 +307,13 @@ class CarInterfaceBase(ABC):
       events.add(EventName.stockAeb)
     if self.dragonconf.dpSpeedCheck and cs_out.vEgo > MAX_CTRL_SPEED:
       events.add(EventName.speedTooHigh)
-    if self.dragonconf.dpAtl != 1 and cs_out.cruiseState.nonAdaptive:
+    if cs_out.cruiseState.nonAdaptive:
       events.add(EventName.wrongCruiseMode)
-    if self.dragonconf.dpAtl != 1 and cs_out.brakeHoldActive and self.CP.openpilotLongitudinalControl:
+    if cs_out.brakeHoldActive and self.CP.openpilotLongitudinalControl:
       events.add(EventName.brakeHold)
-    if self.dragonconf.dpAtl != 1 and cs_out.parkingBrake:
+    if cs_out.parkingBrake:
       events.add(EventName.parkBrake)
-    if self.dragonconf.dpAtl != 1 and cs_out.accFaulted:
+    if cs_out.accFaulted:
       events.add(EventName.accFaulted)
     if cs_out.steeringPressed:
       events.add(EventName.steerOverride)
@@ -302,28 +351,6 @@ class CarInterfaceBase(ABC):
 
     return events
 
-  def dp_atl_warning(self, ret, events):
-    if self.dragonconf.dpAtl > 0:
-      if self.dp_last_cruise_actual_enabled and not ret.cruiseActualEnabled:
-        events.add(EventName.communityFeatureDisallowedDEPRECATED)
-      elif ret.cruiseState.enabled != ret.cruiseActualEnabled:
-        events.add(EventName.gasPressedOverride)
-      self.dp_last_cruise_actual_enabled = ret.cruiseActualEnabled
-    return events
-
-  def dp_atl_mode(self, ret):
-    enable = ret.cruiseState.enabled
-    available = ret.cruiseState.available
-    if self.dragonconf.dpAtl > 0 and available:
-      enable = True
-      if ret.gearShifter in [car.CarState.GearShifter.reverse, car.CarState.GearShifter.park]:
-        enable = False
-        available = False
-      if ret.seatbeltUnlatched or ret.doorOpen:
-        enable = False
-        available = False
-    return enable, available
-
 
 class RadarInterfaceBase(ABC):
   def __init__(self, CP):
@@ -349,6 +376,7 @@ class CarStateBase(ABC):
     self.cruise_buttons = 0
     self.left_blinker_cnt = 0
     self.right_blinker_cnt = 0
+    self.steering_pressed_cnt = 0
     self.left_blinker_prev = False
     self.right_blinker_prev = False
     self.cluster_speed_hyst_gap = 0.0
@@ -386,6 +414,12 @@ class CarStateBase(ABC):
     self.right_blinker_cnt = blinker_time if right_blinker_lamp else max(self.right_blinker_cnt - 1, 0)
     return self.left_blinker_cnt > 0, self.right_blinker_cnt > 0
 
+  def update_steering_pressed(self, steering_pressed, steering_pressed_min_count):
+    """Applies filtering on steering pressed for noisy driver torque signals."""
+    self.steering_pressed_cnt += 1 if steering_pressed else -1
+    self.steering_pressed_cnt = clip(self.steering_pressed_cnt, 0, steering_pressed_min_count * 2)
+    return self.steering_pressed_cnt > steering_pressed_min_count
+
   def update_blinker_from_stalk(self, blinker_time: int, left_blinker_stalk: bool, right_blinker_stalk: bool):
     """Update blinkers from stalk position. When stalk is seen the blinker will be on for at least blinker_time,
     or until the stalk is turned off, whichever is longer. If the opposite stalk direction is seen the blinker
@@ -415,15 +449,15 @@ class CarStateBase(ABC):
       return GearShifter.unknown
 
     d: Dict[str, car.CarState.GearShifter] = {
-        'P': GearShifter.park, 'PARK': GearShifter.park,
-        'R': GearShifter.reverse, 'REVERSE': GearShifter.reverse,
-        'N': GearShifter.neutral, 'NEUTRAL': GearShifter.neutral,
-        'E': GearShifter.eco, 'ECO': GearShifter.eco,
-        'T': GearShifter.manumatic, 'MANUAL': GearShifter.manumatic,
-        'D': GearShifter.drive, 'DRIVE': GearShifter.drive,
-        'S': GearShifter.sport, 'SPORT': GearShifter.sport,
-        'L': GearShifter.low, 'LOW': GearShifter.low,
-        'B': GearShifter.brake, 'BRAKE': GearShifter.brake,
+      'P': GearShifter.park, 'PARK': GearShifter.park,
+      'R': GearShifter.reverse, 'REVERSE': GearShifter.reverse,
+      'N': GearShifter.neutral, 'NEUTRAL': GearShifter.neutral,
+      'E': GearShifter.eco, 'ECO': GearShifter.eco,
+      'T': GearShifter.manumatic, 'MANUAL': GearShifter.manumatic,
+      'D': GearShifter.drive, 'DRIVE': GearShifter.drive,
+      'S': GearShifter.sport, 'SPORT': GearShifter.sport,
+      'L': GearShifter.low, 'LOW': GearShifter.low,
+      'B': GearShifter.brake, 'BRAKE': GearShifter.brake,
     }
     return d.get(gear.upper(), GearShifter.unknown)
 

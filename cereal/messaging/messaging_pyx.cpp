@@ -6,9 +6,6 @@
         "depends": [
             "cereal/messaging/messaging.h"
         ],
-        "include_dirs": [
-            "./cereal/messaging"
-        ],
         "language": "c++",
         "name": "cereal.messaging.messaging_pyx",
         "sources": [
@@ -717,7 +714,7 @@ static CYTHON_INLINE float __PYX_NAN() {
 #include "typeinfo"
 #include <errno.h>
 #include <vector>
-#include "messaging.h"
+#include "cereal/messaging/messaging.h"
 #ifdef _OPENMP
 #include <omp.h>
 #endif /* _OPENMP */

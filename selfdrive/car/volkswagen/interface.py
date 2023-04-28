@@ -1,10 +1,10 @@
 from cereal import car
 from panda import Panda
 from common.conversions import Conversions as CV
-from selfdrive.car import STD_CARGO_KG, scale_rot_inertia, scale_tire_stiffness, \
-                          gen_empty_fingerprint, get_safety_config
+from selfdrive.car import STD_CARGO_KG, get_safety_config
 from selfdrive.car.interfaces import CarInterfaceBase
 from selfdrive.car.volkswagen.values import CAR, PQ_CARS, CANBUS, NetworkLocation, TransmissionType, GearShifter
+from common.params import Params
 
 ButtonType = car.CarState.ButtonEvent.Type
 EventName = car.CarEvent.EventName
@@ -22,10 +22,9 @@ class CarInterface(CarInterfaceBase):
       self.cp_ext = self.cp_cam
 
   @staticmethod
-  def get_params(candidate, fingerprint=gen_empty_fingerprint(), car_fw=None, experimental_long=False):
-    ret = CarInterfaceBase.get_std_params(candidate, fingerprint)
+  def _get_params(ret, candidate, fingerprint, car_fw, experimental_long):
     ret.carName = "volkswagen"
-    ret.radarOffCan = True
+    ret.radarUnavailable = True
 
     use_off_car_defaults = len(fingerprint[0]) == 0  # Pick sensible carParams during offline doc generation/CI jobs
 
@@ -74,7 +73,6 @@ class CarInterface(CarInterfaceBase):
     ret.steerActuatorDelay = 0.1
     ret.steerLimitTimer = 0.4
     ret.steerRatio = 15.6  # Let the params learner figure this out
-    tire_stiffness_factor = 1.0  # Let the params learner figure this out
     ret.lateralTuning.pid.kpBP = [0.]
     ret.lateralTuning.pid.kiBP = [0.]
     ret.lateralTuning.pid.kf = 0.00006
@@ -83,8 +81,12 @@ class CarInterface(CarInterfaceBase):
 
     # Global longitudinal tuning defaults, can be overridden per-vehicle
 
+    dp_atl = int(Params().get("dp_atl").decode('utf-8'))
+    if dp_atl == 1:
+      ret.openpilotLongitudinalControl = False
+
     ret.experimentalLongitudinalAvailable = ret.networkLocation == NetworkLocation.gateway or use_off_car_defaults
-    if experimental_long:
+    if experimental_long and dp_atl != 1:
       # Proof-of-concept, prep for E2E only. No radar points available. Panda ALLOW_DEBUG firmware required.
       ret.openpilotLongitudinalControl = True
       ret.safetyConfigs[0].safetyParam |= Panda.FLAG_VOLKSWAGEN_LONG_CONTROL
@@ -109,6 +111,11 @@ class CarInterface(CarInterfaceBase):
     elif candidate == CAR.ATLAS_MK1:
       ret.mass = 2011 + STD_CARGO_KG
       ret.wheelbase = 2.98
+
+    elif candidate == CAR.CRAFTER_MK2:
+      ret.mass = 2100 + STD_CARGO_KG
+      ret.wheelbase = 3.64  # SWB, LWB is 4.49, TBD how to detect difference
+      ret.minSteerSpeed = 50 * CV.KPH_TO_MS
 
     elif candidate == CAR.GOLF_MK7:
       ret.mass = 1397 + STD_CARGO_KG
@@ -137,7 +144,6 @@ class CarInterface(CarInterfaceBase):
     elif candidate == CAR.SHARAN_MK2:
       ret.mass = 1639 + STD_CARGO_KG
       ret.wheelbase = 2.92
-      ret.minEnableSpeed = 30 * CV.KPH_TO_MS
       ret.minSteerSpeed = 50 * CV.KPH_TO_MS
       ret.steerActuatorDelay = 0.2
 
@@ -186,6 +192,10 @@ class CarInterface(CarInterfaceBase):
       ret.mass = 1227 + STD_CARGO_KG
       ret.wheelbase = 2.64
 
+    elif candidate == CAR.SKODA_FABIA_MK4:
+      ret.mass = 1266 + STD_CARGO_KG
+      ret.wheelbase = 2.56
+
     elif candidate == CAR.SKODA_KAMIQ_MK1:
       ret.mass = 1265 + STD_CARGO_KG
       ret.wheelbase = 2.66
@@ -213,24 +223,20 @@ class CarInterface(CarInterfaceBase):
     else:
       raise ValueError(f"unsupported car {candidate}")
 
-    CarInterfaceBase.configure_dp_tune(candidate, ret.lateralTuning)
+    CarInterfaceBase.dp_lat_tune_collection(candidate, ret.latTuneCollection)
+    CarInterfaceBase.configure_dp_tune(ret.lateralTuning, ret.latTuneCollection)
 
     ret.autoResumeSng = ret.minEnableSpeed == -1
-    ret.rotationalInertia = scale_rot_inertia(ret.mass, ret.wheelbase)
     ret.centerToFront = ret.wheelbase * 0.45
-    ret.tireStiffnessFront, ret.tireStiffnessRear = scale_tire_stiffness(ret.mass, ret.wheelbase, ret.centerToFront,
-                                                                         tire_stiffness_factor=tire_stiffness_factor)
     return ret
 
   # returns a car.CarState
   def _update(self, c):
     ret = self.CS.update(self.cp, self.cp_cam, self.cp_ext, self.CP.transmissionType)
-    ret.cruiseState.enabled, ret.cruiseState.available = self.dp_atl_mode(ret)
 
     events = self.create_common_events(ret, extra_gears=[GearShifter.eco, GearShifter.sport, GearShifter.manumatic],
                                        pcm_enable=not self.CS.CP.openpilotLongitudinalControl,
                                        enable_buttons=(ButtonType.setCruise, ButtonType.resumeCruise))
-    events = self.dp_atl_warning(ret, events)
 
     # Low speed steer alert hysteresis logic
     if self.CP.minSteerSpeed > 0. and ret.vEgo < (self.CP.minSteerSpeed + 1.):
@@ -241,7 +247,7 @@ class CarInterface(CarInterfaceBase):
       events.add(EventName.belowSteerSpeed)
 
     if self.CS.CP.openpilotLongitudinalControl:
-      if ret.vEgo < self.CP.minEnableSpeed + 2.:
+      if ret.vEgo < self.CP.minEnableSpeed + 0.5:
         events.add(EventName.belowEngageSpeed)
       if c.enabled and ret.vEgo < self.CP.minEnableSpeed:
         events.add(EventName.speedTooLow)
@@ -250,5 +256,5 @@ class CarInterface(CarInterfaceBase):
 
     return ret
 
-  def apply(self, c):
-    return self.CC.update(c, self.CS, self.ext_bus)
+  def apply(self, c, now_nanos):
+    return self.CC.update(c, self.CS, self.ext_bus, now_nanos)
