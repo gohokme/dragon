@@ -117,6 +117,7 @@ CAR_INFO: Dict[str, Union[GMCarInfo, List[GMCarInfo]]] = {
   CAR.EQUINOX: GMCarInfo("Chevrolet Equinox 2019-22"),
   CAR.TRAILBLAZER: [
     GMCarInfo("Chevrolet Trailblazer 2022", "RS Trim with Adaptive Cruise Control Package"),
+  ],
   CAR.TRAX: [
     GMCarInfo("Chevrolet Trax 2023", "RS Trim with Adaptive Cruise Control Package"),
   ],
