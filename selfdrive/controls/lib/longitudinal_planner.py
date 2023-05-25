@@ -9,9 +9,9 @@ from common.filter_simple import FirstOrderFilter
 from common.realtime import DT_MDL
 from selfdrive.legacy_modeld.constants import T_IDXS
 from selfdrive.controls.lib.longcontrol import LongCtrlState
-from selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc, MIN_ACCEL, MAX_ACCEL, T_FOLLOW
+from selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc, MIN_ACCEL, MAX_ACCEL, T_FOLLOW, STOP_DISTANCE
 from selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDXS as T_IDXS_MPC
-from selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, CONTROL_N
+from selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, CONTROL_N, get_speed_error
 from system.swaglog import cloudlog
 from selfdrive.controls.lib.vision_turn_controller import VisionTurnController
 
@@ -31,9 +31,9 @@ _DP_E2E_LEAD_COUNT = 5
 
 _DP_E2E_STOP_BP = [0., 10., 20., 30., 40., 50., 55.]
 _DP_E2E_STOP_DIST = [10, 30., 50., 70., 80., 90., 120.]
-_DP_E2E_STOP_COUNT = 5
+_DP_E2E_STOP_COUNT = 3
 
-_DP_E2E_SNG_COUNT = 5
+_DP_E2E_SNG_COUNT = 3
 _DP_E2E_SNG_ACC_COUNT = 5
 _DP_E2E_SWAP_COUNT = 10
 
@@ -109,6 +109,8 @@ class LongitudinalPlanner:
     return reset_state
 
   def conditional_e2e(self, sm):
+    if not sm['controlsState'].experimentalMode:
+      return self._set_dp_e2e_mode('acc', True)
     v_ego_kph = sm['carState'].vEgo * 3.6
     standstill = sm['carState'].standstill
 
@@ -145,7 +147,7 @@ class LongitudinalPlanner:
 
     # when we see a lead
     # if sm['dragonConf'].dpE2EConditionalVoacc and self.dp_e2e_has_lead:
-    if True and self.dp_e2e_has_lead:
+    if self.CP.radarUnavailable and self.dp_e2e_has_lead:
       # drive above conditional speed and lead is too close
       if lead_dist <= v_ego_kph * self.dp_e2e_tf * interp(v_ego_kph, [50., 60., 80., 85, 90.], [1.25, 1.20, 1.10, 1.05, 1.]) / 3.6:
         self.dp_e2e_tf_count += 1
@@ -217,8 +219,7 @@ class LongitudinalPlanner:
     # Prevent divergence, smooth in current v_ego
     self.v_desired_filter.x = max(0.0, self.v_desired_filter.update(v_ego))
     # Compute model v_ego error
-    if len(sm['modelV2'].temporalPose.trans):
-      self.v_model_error = sm['modelV2'].temporalPose.trans[0] - v_ego
+    self.v_model_error = get_speed_error(sm['modelV2'], v_ego)
 
     # rick - vision turn controller from move-fast team
     # https://github.com/move-fast/openpilot/blob/develop/selfdrive/controls/lib/vision_turn_controller.py
@@ -238,7 +239,9 @@ class LongitudinalPlanner:
     self.mpc.set_accel_limits(accel_limits_turns[0], accel_limits_turns[1])
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
     x, v, a, j = self.parse_model(sm['modelV2'], self.v_model_error)
-    self.mpc.update(sm['radarState'], v_cruise, x, v, a, j)
+    # dynamic stopping distance ONLY when on radarUnavailable vehicles (e.g. Toyota C-HR, VW)
+    stop_distance = STOP_DISTANCE if not self.CP.radarUnavailable else interp(sm['carState'].vEgo, [0., 2.78, 5.55, 22.], [3.7, 4., 5, STOP_DISTANCE])
+    self.mpc.update(sm['radarState'], v_cruise, x, v, a, j, prev_accel_constraint, T_FOLLOW, stop_distance)
 
     self.v_desired_trajectory_full = np.interp(T_IDXS, T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory_full = np.interp(T_IDXS, T_IDXS_MPC, self.mpc.a_solution)
@@ -273,6 +276,7 @@ class LongitudinalPlanner:
     longitudinalPlan.hasLead = sm['radarState'].leadOne.status
     longitudinalPlan.longitudinalPlanSource = self.mpc.source
     longitudinalPlan.fcw = self.fcw
+    longitudinalPlan.longitudinalValid = self.mpc.mode == 'acc'
 
     longitudinalPlan.solverExecutionTime = self.mpc.solve_time
 

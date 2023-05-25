@@ -18,6 +18,10 @@ public:
 
   static std::string get_serial() { return "cccccc"; }
 
+  static std::map<std::string, std::string> get_init_logs() {
+    return {};
+  }
+
   static void reboot() {}
   static void poweroff() {}
   static void set_brightness(int percent) {}
@@ -30,4 +34,5 @@ public:
   static bool PC() { return false; }
   static bool TICI() { return false; }
   static bool AGNOS() { return false; }
+  static bool EON() { return false; }
 };

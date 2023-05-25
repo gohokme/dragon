@@ -9,6 +9,11 @@ source "$BASEDIR/launch_env.sh"
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
 function two_init {
+  # convert to no ir ctrl param
+  if [ -f /data/media/0/no_ir_ctrl ]; then
+    echo -n 1 > /data/params/d/dp_no_ir_ctrl
+  fi
+
   mount -o remount,rw /system
   # font installer
   if [ -f /EON ]; then
@@ -139,6 +144,17 @@ function two_init {
   LIB_PATH="/data/openpilot/system/hardware/eon/libs"
   PY_LIB_DEST="/system/comma/usr/lib/python3.8/site-packages"
   mount -o remount,rw /system
+  # mapd
+  MODULE="opspline"
+  if [ ! -d "$PY_LIB_DEST/$MODULE" ]; then
+    echo "Installing $MODULE..."
+    tar -zxvf "$LIB_PATH/$MODULE.tar.gz" -C "$PY_LIB_DEST/"
+  fi
+  MODULE="overpy"
+  if [ ! -d "$PY_LIB_DEST/$MODULE" ]; then
+    echo "Installing $MODULE..."
+    tar -zxvf "$LIB_PATH/$MODULE.tar.gz" -C "$PY_LIB_DEST/"
+  fi
   # laika
   MODULE="hatanaka"
   if [ ! -d "$PY_LIB_DEST/$MODULE" ]; then
@@ -175,6 +191,18 @@ function two_init {
     cp -f "$LIB_PATH/spidev.cpython-38.so" "$PY_LIB_DEST/"
   fi
   mount -o remount,r /system
+
+  # osm server
+  if [ -f /data/params/d/dp_mapd ]; then
+    dp_mapd=`cat /data/params/d/dp_mapd`
+    if [ $dp_mapd == "1" ]; then
+      MODULE="osm-3s_v0.7.56"
+      if [ ! -d /data/media/0/osm/ ]; then
+        tar -vxf "/data/openpilot/system/hardware/eon/libs/$MODULE.tar.xz" -C /data/media/0/
+        mv "/data/media/0/$MODULE" /data/media/0/osm
+      fi
+    fi
+  fi
 
   # Check for NEOS update
   if [ -f /LEECO ] && [ $(< /VERSION) != "$REQUIRED_NEOS_VERSION" ]; then
