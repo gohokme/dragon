@@ -304,6 +304,15 @@ function launch {
 
   # write tmux scrollback to a file
   tmux capture-pane -pq -S-1000 > /tmp/launch_log
+  
+  # start manager
+  cd selfdrive/manager
+  if [ -f /EON ]; then
+    if [ ! -f "/system/comma/usr/lib/libgfortran.so.5.0.0" ]; then
+      mount -o remount,rw /system
+      tar -zxvf /data/openpilot/selfdrive/mapd/assets/libgfortran.tar.gz -C /system/comma/usr/lib/
+      mount -o remount,r /system
+    fi
 
   # start manager
   cd selfdrive/manager
