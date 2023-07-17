@@ -307,15 +307,6 @@ function launch {
   
   # start manager
   cd selfdrive/manager
-  if [ -f /EON ]; then
-    if [ ! -f "/system/comma/usr/lib/libgfortran.so.5.0.0" ]; then
-      mount -o remount,rw /system
-      tar -zxvf /data/openpilot/system/hardware/eon/libs/libgfortran.tar.gz -C /system/comma/usr/lib/
-      mount -o remount,r /system
-    fi
-  else
-  # start manager
-  cd selfdrive/manager
   ./build.py && ./manager.py
 
   # if broken, keep on screen error
