@@ -310,7 +310,7 @@ function launch {
   if [ -f /EON ]; then
     if [ ! -f "/system/comma/usr/lib/libgfortran.so.5.0.0" ]; then
       mount -o remount,rw /system
-      tar -zxvf /data/openpilot/selfdrive/mapd/assets/libgfortran.tar.gz -C /system/comma/usr/lib/
+      tar -zxvf /data/openpilot/system/hardware/eon/libs/libgfortran.tar.gz -C /system/comma/usr/lib/
       mount -o remount,r /system
     fi
 
