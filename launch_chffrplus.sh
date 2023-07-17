@@ -313,7 +313,7 @@ function launch {
       tar -zxvf /data/openpilot/system/hardware/eon/libs/libgfortran.tar.gz -C /system/comma/usr/lib/
       mount -o remount,r /system
     fi
-
+  else
   # start manager
   cd selfdrive/manager
   ./build.py && ./manager.py
