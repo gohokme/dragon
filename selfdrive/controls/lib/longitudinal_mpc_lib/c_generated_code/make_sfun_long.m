@@ -50,7 +50,7 @@ SOURCES = { ...
             'acados_solver_long.c'
           };
 
-INC_PATH = '/data/openpilot/third_party/acados/include/acados/include';
+INC_PATH = '/data/openpilot/third_party/acados/include';
 
 INCS = {['-I', fullfile(INC_PATH, 'blasfeo', 'include')], ...
         ['-I', fullfile(INC_PATH, 'hpipm', 'include')], ...
@@ -66,7 +66,7 @@ COMPDEFINES = 'COMPDEFINES=$COMPDEFINES';
 
 
 
-LIB_PATH = ['-L', fullfile('/data/openpilot/third_party/acados/include/acados/lib')];
+LIB_PATH = ['-L', fullfile('/data/openpilot/third_party/acados/lib')];
 
 LIBS = {'-lacados', '-lhpipm', '-lblasfeo'};
 
@@ -92,7 +92,7 @@ input_note = strcat(input_note, num2str(i_in), ') ubx_0 - upper bound on x for s
                     ' size [3]\n ');
 i_in = i_in + 1;
 input_note = strcat(input_note, num2str(i_in), ') parameters - concatenated for all shooting nodes 0 to N+1,',...
-                    ' size [91]\n ');
+                    ' size [78]\n ');
 i_in = i_in + 1;
 input_note = strcat(input_note, num2str(i_in), ') y_ref_0, size [6]\n ');
 i_in = i_in + 1;

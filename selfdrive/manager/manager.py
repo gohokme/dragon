@@ -7,19 +7,20 @@ import sys
 import traceback
 from typing import List, Tuple, Union
 
+from cereal import log
 import cereal.messaging as messaging
-import selfdrive.sentry as sentry
-from common.basedir import BASEDIR
-from common.params import Params, ParamKeyType
-from common.text_window import TextWindow
-from selfdrive.boardd.set_time import set_time
-from system.hardware import HARDWARE, PC
-from selfdrive.manager.helpers import unblock_stdout, write_onroad_params
-from selfdrive.manager.process import ensure_running
-from selfdrive.manager.process_config import managed_processes
-from selfdrive.athena.registration import register, UNREGISTERED_DONGLE_ID
-from system.swaglog import cloudlog, add_file_handler
-from system.version import is_dirty, get_commit, get_version, get_origin, get_short_branch, \
+import openpilot.selfdrive.sentry as sentry
+from openpilot.common.basedir import BASEDIR
+from openpilot.common.params import Params, ParamKeyType
+from openpilot.common.text_window import TextWindow
+from openpilot.selfdrive.boardd.set_time import set_time
+from openpilot.system.hardware import HARDWARE, PC
+from openpilot.selfdrive.manager.helpers import unblock_stdout, write_onroad_params
+from openpilot.selfdrive.manager.process import ensure_running
+from openpilot.selfdrive.manager.process_config import managed_processes
+from openpilot.selfdrive.athena.registration import register, UNREGISTERED_DONGLE_ID
+from openpilot.system.swaglog import cloudlog, add_file_handler
+from openpilot.system.version import is_dirty, get_commit, get_version, get_origin, get_short_branch, \
                            get_normalized_origin, terms_version, training_version, \
                            is_tested_branch, is_release_branch
 import json
@@ -34,6 +35,8 @@ def manager_init() -> None:
 
   params = Params()
   params.clear_all(ParamKeyType.CLEAR_ON_MANAGER_START)
+  params.clear_all(ParamKeyType.CLEAR_ON_ONROAD_TRANSITION)
+  params.clear_all(ParamKeyType.CLEAR_ON_OFFROAD_TRANSITION)
 
   default_params: List[Tuple[str, Union[str, bytes]]] = [
     ("CompletedTrainingVersion", "0"),
@@ -42,11 +45,33 @@ def manager_init() -> None:
     ("HasAcceptedTerms", "0"),
     ("LanguageSetting", "main_en"),
     ("OpenpilotEnabledToggle", "1"),
+    ("LongitudinalPersonality", str(log.LongitudinalPersonality.standard)),
+    ("DisableUpdates", "1"),
     ("dp_no_gps_ctrl", "0"),
     ("dp_no_fan_ctrl", "0"),
-    ("dp_alka", "1"),
-    ("dp_mapd", "1"),
+    ("dp_logging", "0"),
+    ("dp_alka", "0"),
+    ("dp_mapd", "0"),
     ("dp_lat_lane_priority_mode", "0"),
+    ("dp_0813", "0"),
+    ("dp_device_auto_shutdown", "0"),
+    ("dp_device_auto_shutdown_in", "30"),
+    ("dp_toyota_sng", "0"),
+    ("dp_toyota_auto_lock", "0"),
+    ("dp_toyota_auto_unlock", "0"),
+    ("dp_device_display_off_mode", "0"),
+    ("dp_device_audible_alert_mode", "0"),
+    ("dp_device_disable_temp_check", "0"),
+    ("dp_fileserv", "0"),
+    ("dp_otisserv", "0"),
+    ("dp_car_dashcam_mode_removal", "0"),
+    ("dp_device_enable_comma_registration", "0"),
+    ("dp_long_accel_profile", "0"),
+    ("dp_long_use_df_tune", "0"),
+    ("dp_long_de2e", "0"),
+    ("dp_mapd_vision_turn_control", "0"),
+    ("dp_hkg_min_steer_speed_bypass", "0"),
+    ("dp_lat_lane_priority_mode_speed_based", "0"),
   ]
   if not PC:
     default_params.append(("LastUpdateTime", datetime.datetime.utcnow().isoformat().encode('utf8')))
@@ -138,12 +163,22 @@ def manager_thread() -> None:
     ignore += ["manage_athenad", "uploader"]
   if os.getenv("NOBOARD") is not None:
     ignore.append("pandad")
+
+  if not params.get_bool("dp_logging"):
+    ignore += ["logcatd", "proclogd", "loggerd"]
   ignore += [x for x in os.getenv("BLOCK", "").split(",") if len(x) > 0]
 
-  if not params.get_bool("dp_mapd") or params.get_bool("dp_no_gps_ctrl"):
-    ignore += ["mapd"]
+  if not params.get_bool("dp_mapd"):
+    ignore += ["mapd", "gpxd"]
+
   if params.get_bool("dp_no_gps_ctrl"):
-    ignore += ["ubloxd", "gpx_uploader", "gpxd"]
+    ignore += ["ubloxd", "gpx_uploader", "gpxd", "mapd"]
+
+  if not params.get_bool("dp_fileserv"):
+    ignore += ["fileserv"]
+
+  if not params.get_bool("dp_otisserv"):
+    ignore += ["otisserv"]
 
   sm = messaging.SubMaster(['deviceState', 'carParams'], poll=['deviceState'])
   pm = messaging.PubMaster(['managerState'])
@@ -183,8 +218,10 @@ def manager_thread() -> None:
 
     # Exit main loop when uninstall/shutdown/reboot is needed
     shutdown = False
-    for param in ("DoUninstall", "DoShutdown", "DoReboot"):
+    for param in ("DoUninstall", "DoShutdown", "DoReboot", "dp_reset_conf"):
       if params.get_bool(param):
+        if param == "dp_reset_conf":
+          os.system("rm -fr /data/params/d/dp_*")
         shutdown = True
         params.put("LastManagerExitReason", f"{param} {datetime.datetime.now()}")
         cloudlog.warning(f"Shutting down manager - {param} set")

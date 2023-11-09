@@ -3,7 +3,7 @@ $Cxx.namespace("cereal");
 
 using Car = import "car.capnp";
 using Legacy = import "legacy.capnp";
-using Dp = import "dp.capnp";
+using Custom = import "custom.capnp";
 
 @0xf3b1f17e25a4285b;
 
@@ -15,6 +15,12 @@ struct Map(Key, Value) {
     key @0 :Key;
     value @1 :Value;
   }
+}
+
+enum LongitudinalPersonality {
+  aggressive @0;
+  standard @1;
+  relaxed @2;
 }
 
 struct InitData {
@@ -126,7 +132,6 @@ struct FrameData {
   frameIdSensor @25 :UInt32;
 
   frameType @7 :FrameType;
-  frameLength @3 :Int32;
 
   # Timestamps
   timestampEof @2 :UInt64;
@@ -161,6 +166,7 @@ struct FrameData {
     ox03c10 @2;
   }
 
+  frameLengthDEPRECATED @3 :Int32;
   globalGainDEPRECATED @5 :Int32;
   androidCaptureResultDEPRECATED @9 :AndroidCaptureResult;
   lensPosDEPRECATED @11 :Int32;
@@ -328,6 +334,7 @@ struct DeviceState @0xa4d8b5af2aa492eb {
   nvmeTempC @35 :List(Float32);
   modemTempC @36 :List(Float32);
   pmicTempC @39 :List(Float32);
+  maxTempC @44 :Float32;  # max of other temps, used to control fan
   thermalZones @38 :List(ThermalZone);
   thermalStatus @14 :ThermalStatus;
 
@@ -516,6 +523,10 @@ struct PandaState @0xa7649e2575e4591e {
     canfdEnabled @18 :Bool;
     brsEnabled @19 :Bool;
     canfdNonIso @20 :Bool;
+    irq0CallRate @21 :UInt32;
+    irq1CallRate @22 :UInt32;
+    irq2CallRate @23 :UInt32;
+    canCoreResetCnt @24 :UInt32;
 
     enum LecErrorCode {
       noError @0;
@@ -576,6 +587,7 @@ struct RadarState @0x9a185389d6fdd05f {
     aLeadTau @12 :Float32;
     modelProb @13 :Float32;
     radar @14 :Bool;
+    radarTrackId @15 :Int32 = -1;
 
     aLeadDEPRECATED @5 :Float32;
   }
@@ -603,6 +615,7 @@ struct LiveCalibrationData {
   rpyCalib @7 :List(Float32);
   rpyCalibSpread @8 :List(Float32);
   wideFromDeviceEuler @10 :List(Float32);
+  height @12 :List(Float32);
 
   warpMatrixDEPRECATED @0 :List(Float32);
   calStatusDEPRECATED @1 :Int8;
@@ -852,9 +865,13 @@ struct ModelDataV2 {
   leadsV3 @18 :List(LeadDataV3);
 
   meta @12 :MetaData;
+  confidence @23: ConfidenceClass;
 
   # Model perceived motion
   temporalPose @21 :Pose;
+
+  navEnabled @22 :Bool;
+  locationMonoTime @24 :UInt64;
 
 
   struct LeadDataV2 {
@@ -900,6 +917,12 @@ struct ModelDataV2 {
     steerOverrideProbDEPRECATED @4 :Float32;
   }
 
+  enum ConfidenceClass {
+    red @0;
+    yellow @1;
+    green @2;
+  }
+
   struct DisengagePredictions {
     t @0 :List(Float32);
     brakeDisengageProbs @1 :List(Float32);
@@ -938,13 +961,17 @@ struct EncodeIndex {
   len @9 :UInt32;
 
   enum Type {
-    bigBoxLossless @0;   # rcamera.mkv
-    fullHEVC @1;         # fcamera.hevc
-    bigBoxHEVC @2;       # bcamera.hevc
-    chffrAndroidH264 @3; # acamera
-    fullLosslessClip @4; # prcamera.mkv
-    front @5;            # dcamera.hevc
-    qcameraH264 @6;      # qcamera.ts
+    bigBoxLossless @0;
+    fullHEVC @1;
+    qcameraH264 @6;
+    livestreamH264 @7;
+
+    # deprecated
+    bigBoxHEVCDEPRECATED @2;
+    chffrAndroidH264DEPRECATED @3;
+    fullLosslessClipDEPRECATED @4;
+    front @5;
+
   }
 }
 
@@ -971,6 +998,7 @@ struct LongitudinalPlan @0xe00b5b3eba12876c {
   jerks @34 :List(Float32);
 
   solverExecutionTime @35 :Float32;
+  personality @36 :LongitudinalPersonality;
 
   enum LongitudinalPlanSource {
     cruise @0;
@@ -996,7 +1024,7 @@ struct LongitudinalPlan @0xe00b5b3eba12876c {
   aTargetMinDEPRECATED @4 :Float32;
   aTargetMaxDEPRECATED @5 :Float32;
   lateralValidDEPRECATED @0 :Bool;
-  longitudinalValid @2 :Bool;
+  longitudinalValidDEPRECATED @2 :Bool;
   dPolyDEPRECATED @1 :List(Float32);
   laneWidthDEPRECATED @11 :Float32;
   vCurvatureDEPRECATED @21 :Float32;
@@ -1040,6 +1068,13 @@ struct LateralPlan @0xe1e9318e2ae8b51e {
   curvatureRates @28 :List(Float32);
 
   solverExecutionTime @30 :Float32;
+  solverCost @32 :Float32;
+  solverState @33 :SolverState;
+
+  struct SolverState {
+    x @0 :List(List(Float32));
+    u @1 :List(Float32);
+  }
 
   enum Desire {
     none @0;
@@ -1126,6 +1161,8 @@ struct LiveLocationKalman {
   excessiveResets @24 :Bool;
   timeToFirstFix @25 :Float32;
 
+  filterState @26 : Measurement;
+
   enum Status {
     uninitialized @0;
     uncalibrated @1;
@@ -1211,6 +1248,8 @@ struct GnssMeasurements {
     svId @1 :UInt8;
     type @2 :EphemerisType;
     source @3 :EphemerisSource;
+    gpsWeek @4 : UInt16;
+    tow @5 :Float64;
   }
 
   struct CorrectedMeasurement {
@@ -1784,6 +1823,9 @@ struct QcomGnss @0xde94674b07ae51c1 {
     elevationDot @20 :Float32;
     elevationUncertainty @21 :Float32;
     velocityCoeff @22 :List(Float64);
+
+    gpsWeek @23 :UInt16;
+    gpsTow @24 :Float64;
   }
 }
 
@@ -1933,6 +1975,7 @@ struct LiveParametersData {
   stiffnessFactorStd @12 :Float32;
   steerRatioStd @13 :Float32;
   roll @14 :Float32;
+  filterState @15 :LiveLocationKalman.Measurement;
 
   yawRateDEPRECATED @7 :Float32;
 }
@@ -1982,6 +2025,8 @@ struct CameraOdometry {
   rotStd @3 :List(Float32); # std rad/s in device frame
   wideFromDeviceEuler @6 :List(Float32);
   wideFromDeviceEulerStd @7 :List(Float32);
+  roadTransformTrans @8 :List(Float32);
+  roadTransformTransStd @9 :List(Float32);
 }
 
 struct Sentinel {
@@ -2040,6 +2085,8 @@ struct NavInstruction {
   speedLimit @10 :Float32; # m/s
   speedLimitSign @11 :SpeedLimitSign;
 
+  allManeuvers @12 :List(Maneuver);
+
   struct Lane {
     directions @0 :List(Direction);
     active @1 :Bool;
@@ -2051,12 +2098,20 @@ struct NavInstruction {
     left @1;
     right @2;
     straight @3;
+    slightLeft @4;
+    slightRight @5;
   }
 
   enum SpeedLimitSign {
     mutcd @0; # US Style
     vienna @1; # EU Style
-    }
+  }
+
+  struct Maneuver {
+    distance @0 :Float32;
+    type @1 :Text;
+    modifier @2 :Text;
+  }
 }
 
 struct NavRoute {
@@ -2076,6 +2131,7 @@ struct MapRenderState {
 
 struct NavModelData {
   frameId @0 :UInt32;
+  locationMonoTime @6 :UInt64;
   modelExecutionTime @1 :Float32;
   dspExecutionTime @2 :Float32;
   features @3 :List(Float32);
@@ -2134,6 +2190,7 @@ struct Event {
     magnetometer @95 :SensorEventData;
     lightSensor @96 :SensorEventData;
     temperatureSensor @97 :SensorEventData;
+    temperatureSensor2 @123 :SensorEventData;
     pandaStates @81 :List(PandaState);
     peripheralState @80 :PeripheralState;
     radarState @13 :RadarState;
@@ -2172,6 +2229,10 @@ struct Event {
     wideRoadEncodeIdx @77 :EncodeIndex;
     qRoadEncodeIdx @90 :EncodeIndex;
 
+    livestreamRoadEncodeIdx @117 :EncodeIndex;
+    livestreamWideRoadEncodeIdx @118 :EncodeIndex;
+    livestreamDriverEncodeIdx @119 :EncodeIndex;
+
     # microphone data
     microphone @103 :Microphone;
 
@@ -2202,6 +2263,22 @@ struct Event {
     wideRoadEncodeData @88 :EncodeData;
     qRoadEncodeData @89 :EncodeData;
 
+    livestreamRoadEncodeData @120 :EncodeData;
+    livestreamWideRoadEncodeData @121 :EncodeData;
+    livestreamDriverEncodeData @122 :EncodeData;
+
+    # *********** Custom: reserved for forks ***********
+    liveMapData @107 :Custom.LiveMapData;
+    longitudinalPlanExt @108 :Custom.LongitudinalPlanExt;
+    lateralPlanExt @109 :Custom.LateralPlanExt;
+    controlsStateExt @110 :Custom.ControlsStateExt;
+    customReserved4 @111 :Custom.CustomReserved4;
+    customReserved5 @112 :Custom.CustomReserved5;
+    customReserved6 @113 :Custom.CustomReserved6;
+    customReserved7 @114 :Custom.CustomReserved7;
+    customReserved8 @115 :Custom.CustomReserved8;
+    customReserved9 @116 :Custom.CustomReserved9;
+
     # *********** legacy + deprecated ***********
     model @9 :Legacy.ModelData; # TODO: rename modelV2 and mark this as deprecated
     liveMpcDEPRECATED @36 :LiveMpcData;
@@ -2216,7 +2293,7 @@ struct Event {
     cellInfoDEPRECATED @28 :List(Legacy.CellInfo);
     wifiScanDEPRECATED @29 :List(Legacy.WifiScan);
     uiNavigationEventDEPRECATED @50 :Legacy.UiNavigationEvent;
-    liveMapData @62 :Dp.LiveMapData;
+    liveMapDataDEPRECATED @62 :LiveMapDataDEPRECATED;
     gpsPlannerPointsDEPRECATED @40 :Legacy.GPSPlannerPoints;
     gpsPlannerPlanDEPRECATED @41 :Legacy.GPSPlannerPlan;
     applanixRawDEPRECATED @42 :Data;

@@ -1,17 +1,16 @@
-import random
-import threading
 import time
-from statistics import mean
+import threading
 from typing import Optional
 
-from cereal import log
-from common.params import Params, put_nonblocking
-from common.realtime import sec_since_boot
-from system.hardware import HARDWARE, TICI
-from system.swaglog import cloudlog
-# from selfdrive.statsd import statlog
-import os
+from openpilot.common.params import Params, put_nonblocking
+from openpilot.system.hardware import HARDWARE, TICI
+from openpilot.system.swaglog import cloudlog
+# from openpilot.selfdrive.statsd import statlog
 
+from statistics import mean
+import random
+from cereal import log
+import os
 if TICI:
   CAR_VOLTAGE_LOW_PASS_K = 0.011 # LPF gain for 45s tau (dt/tau / (dt/tau + 1))
 else:
@@ -40,9 +39,9 @@ class PowerMonitoring:
     self.car_voltage_instant_mV = 12e3          # Last value of peripheralState voltage
     self.integration_lock = threading.Lock()
     self.is_oneplus = os.path.isfile('/ONEPLUS')
-    self.dp_auto_shutdown = True
-    self.dp_auto_shutdown_in = 300
-    self.dp_auto_shutdown_voltage_prev = 0
+    self.dp_device_auto_shutdown = self.params.get_bool("dp_device_auto_shutdown")
+    self.dp_device_auto_shutdown_in = int(self.params.get("dp_device_auto_shutdown_in"))
+    self.dp_device_auto_shutdown_voltage_prev = 0
 
     car_battery_capacity_uWh = self.params.get("CarBatteryCapacity")
     if car_battery_capacity_uWh is None:
@@ -54,7 +53,7 @@ class PowerMonitoring:
   # Calculation tick
   def calculate(self, voltage: Optional[int], ignition: bool):
     try:
-      now = sec_since_boot()
+      now = time.monotonic()
 
       # If peripheralState is None, we're probably not in a car, so we don't care
       if voltage is None:
@@ -169,7 +168,7 @@ class PowerMonitoring:
     if offroad_timestamp is None:
       return False
 
-    now = sec_since_boot()
+    now = time.monotonic()
     should_shutdown = False
     offroad_time = (now - offroad_timestamp)
     low_voltage_shutdown = (self.car_voltage_mV < (VBATT_PAUSE_CHARGING * 1e3) and
@@ -191,7 +190,7 @@ class PowerMonitoring:
     if offroad_timestamp is None:
       return False
 
-    now = sec_since_boot()
+    now = time.monotonic()
 
     disable_charging = False
     disable_charging |= (now - offroad_timestamp) > MAX_TIME_OFFROAD_S
@@ -207,22 +206,22 @@ class PowerMonitoring:
     if offroad_timestamp is None:
       return False
 
-    now = sec_since_boot()
+    now = time.monotonic()
     panda_charging = (peripheralState.usbPowerMode != log.PeripheralState.UsbPowerMode.client)
     # BATT_PERC_OFF = 3 if self.is_oneplus else 10
 
-    if started_seen and self.dp_auto_shutdown and (now - offroad_timestamp) > self.dp_auto_shutdown_in:
+    if started_seen and self.dp_device_auto_shutdown and (now - offroad_timestamp) > self.dp_device_auto_shutdown_in:
       self.params.put_bool("ForcePowerDown", True)
       if not panda_charging:
         return True
       # rick - if voltage is not updating, assuming the panda is disconnected (e.g. white panda or black w/o comma power)
-      if peripheralState.voltage == self.dp_auto_shutdown_voltage_prev:
+      if peripheralState.voltage == self.dp_device_auto_shutdown_voltage_prev:
         return True
-      self.dp_auto_shutdown_voltage_prev = peripheralState.voltage
+      self.dp_device_auto_shutdown_voltage_prev = peripheralState.voltage
 
     should_shutdown = False
     # Wait until we have shut down charging before powering down
-    should_shutdown |= (not panda_charging and self.legacy_should_disable_charging(ignition, in_car, offroad_timestamp))
+    # should_shutdown |= (not panda_charging and self.legacy_should_disable_charging(ignition, in_car, offroad_timestamp))
     # should_shutdown |= ((HARDWARE.get_battery_capacity() < BATT_PERC_OFF) and (not HARDWARE.get_battery_charging()) and ((now - offroad_timestamp) > 60))
     should_shutdown &= started_seen or (now > MIN_ON_TIME_S)
     return should_shutdown

@@ -11,7 +11,7 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 function two_init {
   # convert to no ir ctrl param
   if [ -f /data/media/0/no_ir_ctrl ]; then
-    echo -n 1 > /data/params/d/dp_no_ir_ctrl
+    echo -n 1 > /data/params/d/dp_device_no_ir_ctrl
   fi
 
   mount -o remount,rw /system
@@ -144,6 +144,11 @@ function two_init {
   LIB_PATH="/data/openpilot/system/hardware/eon/libs"
   PY_LIB_DEST="/system/comma/usr/lib/python3.8/site-packages"
   mount -o remount,rw /system
+  # libgfortran
+  if [ ! -f "/system/comma/usr/lib/libgfortran.so.5.0.0" ]; then
+    echo "Installing libgfortran..."
+    tar -zxvf "$LIB_PATH/libgfortran.tar.gz" -C /system/comma/usr/lib/
+  fi
   # mapd
   MODULE="opspline"
   if [ ! -d "$PY_LIB_DEST/$MODULE" ]; then

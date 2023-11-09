@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 from cereal import car
 from panda import Panda
-from selfdrive.car.tesla.values import CANBUS, CAR
-from selfdrive.car import STD_CARGO_KG, get_safety_config
-from selfdrive.car.interfaces import CarInterfaceBase
+from openpilot.selfdrive.car.tesla.values import CANBUS, CAR
+from openpilot.selfdrive.car import get_safety_config
+from openpilot.selfdrive.car.interfaces import CarInterfaceBase
+
+from openpilot.common.params import Params
 
 
 class CarInterface(CarInterfaceBase):
@@ -15,6 +17,7 @@ class CarInterface(CarInterfaceBase):
     # so the steering behaves like autopilot. This is not
     # how openpilot should be, hence dashcamOnly
     ret.dashcamOnly = True
+    ret.dashcamOnly = False if ret.dashcamOnly and Params().get_bool("dp_car_dashcam_mode_removal") else ret.dashcamOnly
 
     ret.steerControlType = car.CarParams.SteerControlType.angle
 
@@ -42,7 +45,7 @@ class CarInterface(CarInterfaceBase):
     ret.steerActuatorDelay = 0.25
 
     if candidate in (CAR.AP2_MODELS, CAR.AP1_MODELS):
-      ret.mass = 2100. + STD_CARGO_KG
+      ret.mass = 2100.
       ret.wheelbase = 2.959
       ret.centerToFront = ret.wheelbase * 0.5
       ret.steerRatio = 15.0

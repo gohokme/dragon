@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 import os
+import time
 import numpy as np
 
 from casadi import SX, vertcat, sin, cos
 
-from common.realtime import sec_since_boot
-from selfdrive.legacy_modeld.constants import T_IDXS
+# from common.realtime import sec_since_boot
+# from selfdrive.controls.lib.drive_helpers import LAT_MPC_N as N
+N = 16
+from openpilot.selfdrive.legacy_modeld.constants import T_IDXS
 
 if __name__ == '__main__':  # generating code
-  from third_party.acados.acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
+  from openpilot.third_party.acados.acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
 else:
-  from selfdrive.controls.lib.legacy_lateral_mpc_lib.c_generated_code.acados_ocp_solver_pyx import AcadosOcpSolverCython  # pylint: disable=no-name-in-module, import-error
+  from openpilot.selfdrive.controls.lib.legacy_lateral_mpc_lib.c_generated_code.acados_ocp_solver_pyx import AcadosOcpSolverCython  # pylint: disable=no-name-in-module, import-error
 
 LAT_MPC_DIR = os.path.dirname(os.path.abspath(__file__))
 EXPORT_DIR = os.path.join(LAT_MPC_DIR, "c_generated_code")
@@ -19,7 +22,6 @@ X_DIM = 4
 P_DIM = 2
 MODEL_NAME = 'lat'
 ACADOS_SOLVER_TYPE = 'SQP_RTI'
-N = 16
 
 def gen_lat_model():
   model = AcadosModel()
@@ -89,7 +91,7 @@ def gen_lat_ocp():
   # TODO hacky weights to keep behavior the same
   ocp.model.cost_y_expr = vertcat(y_ego,
                                   ((v_ego +5.0) * psi_ego),
-                                  ((v_ego + 5.0) * 4.0 * curv_rate))
+                                  ((v_ego +5.0) * 4 * curv_rate))
   ocp.model.cost_y_expr_e = vertcat(y_ego,
                                     ((v_ego +5.0) * psi_ego))
 
@@ -147,7 +149,7 @@ class LateralMpc():
     #TODO hacky weights to keep behavior the same
     self.solver.cost_set(N, 'W', (3/20.)*W[:2,:2])
 
-  def run(self, x0, p, y_pts, heading_pts, curv_rate_pts):
+  def run(self, x0, p, y_pts, heading_pts):
     x0_cp = np.copy(x0)
     p_cp = np.copy(p)
     self.solver.constraints_set(0, "lbx", x0_cp)
@@ -156,16 +158,15 @@ class LateralMpc():
     v_ego = p_cp[0]
     # rotation_radius = p_cp[1]
     self.yref[:,1] = heading_pts*(v_ego+5.0)
-    self.yref[:,2] = curv_rate_pts * (v_ego+5.0) * 4.0
     for i in range(N):
       self.solver.cost_set(i, "yref", self.yref[i])
       self.solver.set(i, "p", p_cp)
     self.solver.set(N, "p", p_cp)
     self.solver.cost_set(N, "yref", self.yref[N][:2])
 
-    t = sec_since_boot()
+    t = time.monotonic()
     self.solution_status = self.solver.solve()
-    self.solve_time = sec_since_boot() - t
+    self.solve_time = time.monotonic() - t
 
     for i in range(N+1):
       self.x_sol[i] = self.solver.get(i, 'x')
