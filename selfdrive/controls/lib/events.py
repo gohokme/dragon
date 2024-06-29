@@ -837,7 +837,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.NO_ENTRY: NoEntryAlert("Controls Mismatch"),
   },
 
-  EventName.controlsMismatchLong: {
+  EventName.controlsMismatch: {
     ET.IMMEDIATE_DISABLE: ImmediateDisableAlert("콘트롤 미스매치\nLongitudinal"),
     ET.NO_ENTRY: NoEntryAlert("콘트롤 미스매치\nLongitudinal"),
   },
