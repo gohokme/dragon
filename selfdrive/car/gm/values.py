@@ -76,7 +76,7 @@ class CAR(StrEnum):
   SILVERADO = "CHEVROLET SILVERADO 1500 2020"
   EQUINOX = "CHEVROLET EQUINOX 2019"
   TRAILBLAZER = "CHEVROLET TRAILBLAZER 2021"
-
+  TRAX = "CHEVROLET TRAX"
 
 class Footnote(Enum):
   OBD_II = CarFootnote(
@@ -118,6 +118,7 @@ CAR_INFO: Dict[str, Union[GMCarInfo, List[GMCarInfo]]] = {
   ],
   CAR.EQUINOX: GMCarInfo("Chevrolet Equinox 2019-22"),
   CAR.TRAILBLAZER: GMCarInfo("Chevrolet Trailblazer 2021-22"),
+  CAR.TRAX: GMCarInfo("Chevrolet Trax 2023"),
 }
 
 
